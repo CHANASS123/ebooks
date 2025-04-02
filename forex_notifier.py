@@ -1,14 +1,9 @@
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
+from playwright.sync_api import sync_playwright
 import pandas as pd
-import time  # ✅ 添加 time 模块用于滚动等待
+import time
 import requests
 from bs4 import BeautifulSoup
 import re
-
 
 headers = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -40,85 +35,74 @@ def get_us10y_yield():
     else:
         return f"Error fetching US10Y yield: {response.status_code}"
 
+# ✅ 改为 Playwright 实现
 def get_forexfactory_events():
-    options = Options()
-#     options.add_argument("--headless")  # 如需无头运行可取消注释
-    options.add_argument("--disable-gpu")
-    options.add_argument("--no-sandbox")
-    driver = webdriver.Chrome(options=options)
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page()
+        page.goto("https://www.forexfactory.com/calendar", timeout=60000)
+        page.wait_for_selector("tr.calendar__row")
 
-    driver.get("https://www.forexfactory.com/calendar")
+        rows = page.query_selector_all("tr.calendar__row")
+        for row in rows:
+            try:
+                row.scroll_into_view_if_needed()
+                time.sleep(0.1)
+            except:
+                continue
 
-    WebDriverWait(driver, 30).until(
-        EC.presence_of_element_located((By.CSS_SELECTOR, "tr.calendar__row"))
-    )
+        results = []
+        current_date = ''
 
-    # ⬇️ 用 scrollIntoView() 强制每一行都进入视口，触发真正加载
-    rows = driver.find_elements(By.CSS_SELECTOR, "tr.calendar__row")
-    for row in rows:
-        try:
-            driver.execute_script("arguments[0].scrollIntoView();", row)
-            time.sleep(0.2)  # 给页面反应时间
-        except:
-            continue
+        for row in page.query_selector_all("tr.calendar__row"):
+            try:
+                # 日期
+                date_td = row.query_selector("td.calendar__cell.calendar__date")
+                if date_td:
+                    current_date = date_td.inner_text().strip()
 
+                currency = row.query_selector("td.calendar__cell.calendar__currency").inner_text().strip()
 
-    rows = driver.find_elements(By.CSS_SELECTOR, "tr.calendar__row")
-    current_date = ''
-    results = []
+                impact_span = row.query_selector("td.calendar__cell.calendar__impact span")
+                impact_class = impact_span.get_attribute("class")
+                if "impact-red" in impact_class:
+                    impact = "High"
+                elif "impact-org" in impact_class:
+                    impact = "Medium"
+                elif "impact-yel" in impact_class:
+                    impact = "Low"
+                else:
+                    impact = "None"
 
-    for row in rows:
-        try:
-            # 日期
-            date_td = row.find_elements(By.CSS_SELECTOR, "td.calendar__cell.calendar__date")
-            if date_td:
-                date_span = date_td[0].find_element(By.CLASS_NAME, "date")
-                current_date = date_span.text.strip()
+                event_title = row.query_selector("span.calendar__event-title").inner_text().strip()
 
-            # 货币
-            currency = row.find_element(By.CSS_SELECTOR, "td.calendar__cell.calendar__currency").text.strip()
+                def safe_text(selector):
+                    try:
+                        el = row.query_selector(selector)
+                        return el.inner_text().strip() if el else ""
+                    except:
+                        return ""
 
-            # Impact 图标 class 判断
-            impact_icon = row.find_element(By.CSS_SELECTOR, "td.calendar__cell.calendar__impact span")
-            impact_class = impact_icon.get_attribute("class")
-            if "impact-red" in impact_class:
-                impact = "High"
-            elif "impact-org" in impact_class:
-                impact = "Medium"
-            elif "impact-yel" in impact_class:
-                impact = "Low"
-            else:
-                impact = "None"
+                actual = safe_text("td.calendar__cell.calendar__actual")
+                forecast = safe_text("td.calendar__cell.calendar__forecast")
+                previous = safe_text("td.calendar__cell.calendar__previous")
 
-            # 事件
-            event_title = row.find_element(By.CSS_SELECTOR, "span.calendar__event-title").text.strip()
+                results.append({
+                    "Date": current_date,
+                    "Currency": currency,
+                    "Impact": impact,
+                    "Event": event_title,
+                    "Actual": actual,
+                    "Forecast": forecast,
+                    "Previous": previous
+                })
+            except:
+                continue
 
-            # Actual/Forecast/Previous（容错）
-            def safe_text(selector):
-                try:
-                    return row.find_element(By.CSS_SELECTOR, selector).text.strip()
-                except:
-                    return ""
+        browser.close()
+        return pd.DataFrame(results)
 
-            actual = safe_text("td.calendar__cell.calendar__actual")
-            forecast = safe_text("td.calendar__cell.calendar__forecast")
-            previous = safe_text("td.calendar__cell.calendar__previous")
-
-            results.append({
-                "Date": current_date,
-                "Currency": currency,
-                "Impact": impact,
-                "Event": event_title,
-                "Actual": actual,
-                "Forecast": forecast,
-                "Previous": previous
-            })
-        except Exception:
-            continue
-
-    return pd.DataFrame(results)
-
-
+# ✅ 以下部分未作修改，保持原样
 def filter_actual_forecast_diff(df):
     filtered_rows = []
 
@@ -134,7 +118,6 @@ def filter_actual_forecast_diff(df):
         except:
             raise ValueError(f"无法解析的数值: {val}")
 
-
     for _, row in df.iterrows():
         actual = row['Actual']
         forecast = row['Forecast']
@@ -148,41 +131,39 @@ def filter_actual_forecast_diff(df):
                 continue
     return pd.DataFrame(filtered_rows)
 
-
 def send_wechat_message(title, content, sendkey):
     url = f"https://sctapi.ftqq.com/{sendkey}.send"
     data = {
         "title": title,
-        "desp": content.replace('\n', '\n\n')  # 为了格式更清晰
+        "desp": content.replace('\n', '\n\n')
     }
     requests.post(url, data=data)
 
-# 运行脚本
+# ✅ 主运行逻辑保持不变
 if __name__ == "__main__":
     df = get_forexfactory_events()
     df_high = df[df['Impact'] == 'High']
     df_diff = filter_actual_forecast_diff(df_high)
     usd_jpy = get_usd_jpy_rate()
     us10y = get_us10y_yield()
-#     print(f"USD/JPY Rate: {usd_jpy}")
-#     print(f"US 10Y Yield: {us10y}")
+
     info_df = pd.DataFrame({
         "指标": ["USD/JPY Rate", "US 10Y Yield"],
         "数值": [usd_jpy, us10y]
     })
+
     print(info_df.to_string(index=False))
     print("\n📢 近日高影响力经济事件实际值与预期值不同：\n")
     print(df_diff.to_string(index=False))
     print("\n📢 近日高影响力经济事件一览（仅 High）：\n")
     print(df[df['Impact'] == 'High'].to_string(index=False))
+
     if not df_high.empty:
         from io import StringIO
 
-        # ① 市场指标部分
         message = "📈 当前市场关键指标：\n\n"
         message += info_df.to_string(index=False)
 
-        # ② 实际 ≠ 预测 的部分
         message += "\n\n📢 近日高影响力经济事件实际值与预期值不同：\n\n"
         if not df_diff.empty:
             buffer = StringIO()
@@ -191,14 +172,11 @@ if __name__ == "__main__":
         else:
             message += "暂无实际值与预期值不同的数据。"
 
-        # ③ 明显分隔线 + 全部高影响事件条目列表
         message += "\n\n" + "—" * 30 + "\n\n"
         message += "📋 全部高影响力事件一览：\n\n"
         for _, row in df_high.iterrows():
             message += f"📅 {row['Date']} | {row['Currency']} | {row['Event']}\n预测: {row['Forecast']} | 公布: {row['Actual']} | 前值: {row['Previous']}\n\n"
 
-        # 发送微信
         send_wechat_message("📢 交易提醒：高影响事件更新", message, "SCT274953T09n4FNpFYwAlDB9JsW7HcxJJ")
-
     else:
         send_wechat_message("📢 无高影响力事件", "今天无高影响力经济事件。", "SCT274953T09n4FNpFYwAlDB9JsW7HcxJJ")
