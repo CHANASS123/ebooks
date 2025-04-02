@@ -1,4 +1,5 @@
 selenium
 pandas
 requests
-BeautifulSoup
+beautifulsoup4
+
