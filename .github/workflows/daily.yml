@@ -2,22 +2,27 @@ name: Daily Forex Notifier
 
 on:
   schedule:
-    - cron: "0 16 * * *"   # 每天 UTC 16 点（北京时间 24 点）运行
+    - cron: "0 8 * * *"  # 每天北京时间 16:00 运行（UTC+8）
   workflow_dispatch:
 
 jobs:
-  run:
+  run-script:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout repo
+        uses: actions/checkout@v3
 
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: 3.11
+          python-version: "3.11"
 
       - name: Install dependencies
         run: pip install -r requirements.txt
+
+      - name: Install Playwright Browsers  # ✅ 关键步骤
+        run: python -m playwright install
 
       - name: Run script
         run: python forex_notifier.py
