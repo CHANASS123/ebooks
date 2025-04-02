@@ -1,3 +1,4 @@
+# 服务器运行版本
 from playwright.sync_api import sync_playwright
 import pandas as pd
 import time
@@ -46,7 +47,8 @@ def get_forexfactory_events():
         page.goto("https://www.forexfactory.com/calendar", timeout=60000)
 
         # 等待页面元素出现（不要求“可见”，避免可视区域限制）
-        page.wait_for_selector("tr.calendar__row", state="attached")
+        page.wait_for_load_state("networkidle")
+        page.wait_for_selector("tr.calendar__row", timeout=20000)
         page.wait_for_load_state("networkidle")  # 等页面加载稳定
 
         # 强制滚动加载完整页面（保险做法）
