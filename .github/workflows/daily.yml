@@ -2,7 +2,7 @@ name: Daily Forex Notifier
 
 on:
   schedule:
-    - cron: "0 15 * * *"   # 每天 UTC 8 点（北京时间 16 点）运行
+    - cron: "0 16 * * *"   # 每天 UTC 16 点（北京时间 24 点）运行
   workflow_dispatch:
 
 jobs:
