@@ -39,10 +39,17 @@ def get_us10y_yield():
 def get_forexfactory_events():
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        page = browser.new_page()
+        page = browser.new_page(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            locale="en-US"
+        )
         page.goto("https://www.forexfactory.com/calendar", timeout=60000)
-        page.wait_for_selector("tr.calendar__row")
 
+        # 等待页面元素出现（不要求“可见”，避免可视区域限制）
+        page.wait_for_selector("tr.calendar__row", state="attached")
+        page.wait_for_load_state("networkidle")  # 等页面加载稳定
+
+        # 强制滚动加载完整页面（保险做法）
         rows = page.query_selector_all("tr.calendar__row")
         for row in rows:
             try:
